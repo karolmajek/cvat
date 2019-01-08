@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
             name='Label',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=64)),
+                ('name', models.CharField(max_length=1024)),
             ],
         ),
         migrations.CreateModel(
@@ -59,7 +59,7 @@ class Migration(migrations.Migration):
             name='LabeledBoxAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('box', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.LabeledBox')),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
             ],
@@ -83,7 +83,7 @@ class Migration(migrations.Migration):
             name='ObjectPathAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
                 ('track', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.ObjectPath')),
             ],
@@ -139,7 +139,7 @@ class Migration(migrations.Migration):
             name='TrackedBoxAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('box', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.TrackedBox')),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
             ],

@@ -78,7 +78,7 @@ class Job(models.Model):
 
 class Label(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE)
-    name = models.CharField(max_length=64)
+    name = models.CharField(max_length=1024)
 
     def __str__(self):
         return self.name
@@ -129,7 +129,7 @@ class AttributeSpec(models.Model):
 class AttributeVal(models.Model):
     # TODO: add a validator here to be sure that it corresponds to self.label
     spec = models.ForeignKey(AttributeSpec, on_delete=models.CASCADE)
-    value = models.CharField(max_length=64)
+    value = models.CharField(max_length=1024)
     class Meta:
         abstract = True
 

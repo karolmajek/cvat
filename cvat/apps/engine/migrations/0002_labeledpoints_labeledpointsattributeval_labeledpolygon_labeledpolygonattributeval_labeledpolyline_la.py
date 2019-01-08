@@ -34,7 +34,7 @@ class Migration(migrations.Migration):
             name='LabeledPointsAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('points', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.LabeledPoints')),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
             ],
@@ -60,7 +60,7 @@ class Migration(migrations.Migration):
             name='LabeledPolygonAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('polygon', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.LabeledPolygon')),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
             ],
@@ -86,7 +86,7 @@ class Migration(migrations.Migration):
             name='LabeledPolylineAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('polyline', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.LabeledPolyline')),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
             ],
@@ -112,7 +112,7 @@ class Migration(migrations.Migration):
             name='TrackedPointsAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('points', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.TrackedPoints')),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
             ],
@@ -138,7 +138,7 @@ class Migration(migrations.Migration):
             name='TrackedPolygonAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('polygon', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.TrackedPolygon')),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
             ],
@@ -164,7 +164,7 @@ class Migration(migrations.Migration):
             name='TrackedPolylineAttributeVal',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.CharField(max_length=64)),
+                ('value', models.CharField(max_length=1024)),
                 ('polyline', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.TrackedPolyline')),
                 ('spec', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='engine.AttributeSpec')),
             ],
