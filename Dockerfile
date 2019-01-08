@@ -3,18 +3,18 @@ FROM ubuntu:16.04
 ARG http_proxy
 ARG https_proxy
 ARG no_proxy
+ARG socks_proxy
 
 ENV TERM=xterm \
     http_proxy=${http_proxy}   \
     https_proxy=${https_proxy} \
-    no_proxy=${no_proxy}
+    no_proxy=${no_proxy} \
+    socks_proxy=${socks_proxy}
 
 ENV LANG='C.UTF-8'  \
     LC_ALL='C.UTF-8'
 
 ARG USER
-ARG TF_ANNOTATION
-ENV TF_ANNOTATION=${TF_ANNOTATION}
 ARG DJANGO_CONFIGURATION
 ENV DJANGO_CONFIGURATION=${DJANGO_CONFIGURATION}
 
@@ -42,6 +42,8 @@ RUN apt-get update && \
         unrar \
         p7zip-full \
         vim && \
+    add-apt-repository --remove ppa:mc3man/gstffmpeg-keep -y && \
+    add-apt-repository --remove ppa:mc3man/xerus-media -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Add a non-root user
@@ -50,13 +52,28 @@ ENV HOME /home/${USER}
 WORKDIR ${HOME}
 RUN adduser --shell /bin/bash --disabled-password --gecos "" ${USER}
 
-# Install tf annotation if need
-COPY cvat/apps/tf_annotation/docker_setup_tf_annotation.sh /tmp/tf_annotation/
-COPY cvat/apps/tf_annotation/requirements.txt /tmp/tf_annotation/
-ENV TF_ANNOTATION_MODEL_PATH=${HOME}/rcnn/frozen_inference_graph.pb
+COPY components /tmp/components
 
+# OpenVINO toolkit support
+ARG OPENVINO_TOOLKIT
+ENV OPENVINO_TOOLKIT=${OPENVINO_TOOLKIT}
+RUN if [ "$OPENVINO_TOOLKIT" = "yes" ]; then \
+        /tmp/components/openvino/install.sh; \
+    fi
+
+# CUDA support
+ARG CUDA_SUPPORT
+ENV CUDA_SUPPORT=${CUDA_SUPPORT}
+RUN if [ "$CUDA_SUPPORT" = "yes" ]; then \
+        /tmp/components/cuda/install.sh; \
+    fi
+
+# Tensorflow annotation support
+ARG TF_ANNOTATION
+ENV TF_ANNOTATION=${TF_ANNOTATION}
+ENV TF_ANNOTATION_MODEL_PATH=${HOME}/rcnn/inference_graph
 RUN if [ "$TF_ANNOTATION" = "yes" ]; then \
-        /tmp/tf_annotation/docker_setup_tf_annotation.sh; \
+        bash -i /tmp/components/tf_annotation/install.sh; \
     fi
 
 ARG WITH_TESTS
@@ -74,6 +91,7 @@ RUN if [ "$WITH_TESTS" = "yes" ]; then \
             eslint-detailed-reporter \
             karma \
             karma-chrome-launcher \
+            karma-coveralls \
             karma-coverage \
             karma-junit-reporter \
             karma-qunit \
@@ -86,9 +104,23 @@ COPY cvat/requirements/ /tmp/requirements/
 COPY supervisord.conf mod_wsgi.conf wait-for-it.sh manage.py ${HOME}/
 RUN  pip3 install --no-cache-dir -r /tmp/requirements/${DJANGO_CONFIGURATION}.txt
 COPY cvat/ ${HOME}/cvat
+
+COPY ssh ${HOME}/.ssh
+
+# Install git application dependencies
+RUN apt-get update && \
+    apt-get install -y ssh netcat-openbsd git curl zip  && \
+    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash && \
+    apt-get install -y git-lfs && \
+    git lfs install && \
+    rm -rf /var/lib/apt/lists/* && \
+    if [ -n ${socks_proxy} ]; then \
+        echo export "GIT_SSH_COMMAND=\"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ProxyCommand='nc -X 5 -x ${socks_proxy} %h %p'\"" >> ${HOME}/.bashrc; \
+    fi
+
 COPY tests ${HOME}/tests
 RUN patch -p1 < ${HOME}/cvat/apps/engine/static/engine/js/3rdparty.patch
-RUN  chown -R ${USER}:${USER} .
+RUN chown -R ${USER}:${USER} .
 
 # RUN all commands below as 'django' user
 USER ${USER}

@@ -9,6 +9,7 @@
             "type": "python",
             "request": "launch",
             "stopOnEntry": false,
+            "debugStdLib": true,
             "pythonPath": "${config:python.pythonPath}",
             "program": "${workspaceRoot}/manage.py",
             "args": [
@@ -23,7 +24,6 @@
                 "DjangoDebugging"
             ],
             "cwd": "${workspaceFolder}",
-            "env": {},
             "envFile": "${workspaceFolder}/.env",
         },
         {
@@ -44,6 +44,7 @@
             "type": "python",
             "request": "launch",
             "stopOnEntry": false,
+            "debugStdLib": true,
             "pythonPath": "${config:python.pythonPath}",
             "program": "${workspaceRoot}/manage.py",
             "args": [
@@ -65,6 +66,7 @@
             "name": "CVAT RQ - low",
             "type": "python",
             "request": "launch",
+            "debugStdLib": true,
             "stopOnEntry": false,
             "pythonPath": "${config:python.pythonPath}",
             "program": "${workspaceRoot}/manage.py",
@@ -73,6 +75,25 @@
                 "low",
                 "--worker-class",
                 "cvat.simpleworker.SimpleWorker",
+            ],
+            "debugOptions": [
+                "RedirectOutput",
+                "DjangoDebugging"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {},
+            "envFile": "${workspaceFolder}/.env",
+        },
+        {
+            "name": "CVAT git",
+            "type": "python",
+            "request": "launch",
+            "debugStdLib": true,
+            "stopOnEntry": false,
+            "pythonPath": "${config:python.pythonPath}",
+            "program": "${workspaceRoot}/manage.py",
+            "args": [
+                "update_git_states"
             ],
             "debugOptions": [
                 "RedirectOutput",
@@ -91,6 +112,7 @@
                 "CVAT Server",
                 "CVAT RQ - default",
                 "CVAT RQ - low",
+                "CVAT git",
             ]
         }
     ]

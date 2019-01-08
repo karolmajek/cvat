@@ -3,16 +3,12 @@
 #
 # SPDX-License-Identifier: MIT
 
-import csv
 import os
-import re
-import rq
 import sys
+import rq
 import shlex
-import logging
 import shutil
 import tempfile
-from io import StringIO
 from PIL import Image
 from traceback import print_exception
 from ast import literal_eval
@@ -22,17 +18,19 @@ _SCRIPT_DIR = os.path.realpath(os.path.dirname(__file__))
 _MEDIA_MIMETYPES_FILE = os.path.join(_SCRIPT_DIR, "media.mimetypes")
 mimetypes.init(files=[_MEDIA_MIMETYPES_FILE])
 
+from cvat.apps.engine.models import StatusChoice
+from cvat.apps.engine.plugins import plugin_decorator
+
 import django_rq
 from django.conf import settings
 from django.db import transaction
 from ffmpy import FFmpeg
 from pyunpack import Archive
 from distutils.dir_util import copy_tree
+from collections import OrderedDict
 
 from . import models
-from .logging import task_logger, job_logger
-
-global_logger = logging.getLogger(__name__)
+from .log import slogger
 
 ############################# Low Level server API
 
@@ -158,7 +156,7 @@ def get(tid):
     """Get the task as dictionary of attributes"""
     db_task = models.Task.objects.get(pk=tid)
     if db_task:
-        db_labels = db_task.label_set.prefetch_related('attributespec_set').all()
+        db_labels = db_task.label_set.prefetch_related('attributespec_set').order_by('-pk').all()
         im_meta_data = get_image_meta_cache(db_task)
         attributes = {}
         for db_label in db_labels:
@@ -167,12 +165,18 @@ def get(tid):
                 attributes[db_label.id][db_attrspec.id] = db_attrspec.text
         db_segments = list(db_task.segment_set.prefetch_related('job_set').all())
         segment_length = max(db_segments[0].stop_frame - db_segments[0].start_frame + 1, 1)
-        job_indexes = [segment.job_set.first().id for segment in db_segments]
+        job_indexes = []
+        for segment in db_segments:
+            db_job = segment.job_set.first()
+            job_indexes.append({
+                "job_id": db_job.id,
+                "max_shape_id": db_job.max_shape_id,
+            })
 
         response = {
-            "status": db_task.status.capitalize(),
+            "status": db_task.status,
             "spec": {
-                "labels": { db_label.id:db_label.name for db_label in db_labels },
+                "labels": OrderedDict((db_label.id, db_label.name) for db_label in db_labels),
                 "attributes": attributes
             },
             "size": db_task.size,
@@ -191,6 +195,29 @@ def get(tid):
 
     return response
 
+
+@transaction.atomic
+def save_job_status(jid, status, user):
+    db_job = models.Job.objects.select_related("segment__task").select_for_update().get(pk = jid)
+    db_task = db_job.segment.task
+    status = StatusChoice(status)
+
+    slogger.job[jid].info('changing job status from {} to {} by an user {}'.format(db_job.status, str(status), user))
+
+    db_job.status = status.value
+    db_job.save()
+    db_segments = list(db_task.segment_set.prefetch_related('job_set').all())
+    db_jobs = [db_segment.job_set.first() for db_segment in db_segments]
+
+    if len(list(filter(lambda x: StatusChoice(x.status) == StatusChoice.ANNOTATION, db_jobs))) > 0:
+        db_task.status = StatusChoice.ANNOTATION
+    elif len(list(filter(lambda x: StatusChoice(x.status) == StatusChoice.VALIDATION, db_jobs))) > 0:
+        db_task.status = StatusChoice.VALIDATION
+    else:
+        db_task.status = StatusChoice.COMPLETED
+
+    db_task.save()
+
 def get_job(jid):
     """Get the job as dictionary of attributes"""
     db_job = models.Job.objects.select_related("segment__task").get(id=jid)
@@ -203,7 +230,7 @@ def get_job(jid):
         if db_task.mode == 'annotation':
             im_meta_data['original_size'] = im_meta_data['original_size'][db_segment.start_frame:db_segment.stop_frame + 1]
 
-        db_labels = db_task.label_set.prefetch_related('attributespec_set').all()
+        db_labels = db_task.label_set.prefetch_related('attributespec_set').order_by('-pk').all()
         attributes = {}
         for db_label in db_labels:
             attributes[db_label.id] = {}
@@ -211,8 +238,8 @@ def get_job(jid):
                 attributes[db_label.id][db_attrspec.id] = db_attrspec.text
 
         response = {
-            "status": db_task.status.capitalize(),
-            "labels": { db_label.id:db_label.name for db_label in db_labels },
+            "status": db_job.status,
+            "labels": OrderedDict((db_label.id, db_label.name) for db_label in db_labels),
             "stop": db_segment.stop_frame,
             "taskid": db_task.id,
             "slug": db_task.name,
@@ -223,19 +250,13 @@ def get_job(jid):
             "attributes": attributes,
             "z_order": db_task.z_order,
             "flipped": db_task.flipped,
-            "image_meta_data": im_meta_data
+            "image_meta_data": im_meta_data,
+            "max_shape_id": db_job.max_shape_id,
         }
     else:
         raise Exception("Cannot find the job: {}".format(jid))
 
     return response
-
-def is_task_owner(user, tid):
-    try:
-        return user == models.Task.objects.get(pk=tid).owner or \
-            user.groups.filter(name='admin').exists()
-    except:
-        return False
 
 @transaction.atomic
 def rq_handler(job, exc_type, exc_value, traceback):
@@ -356,13 +377,13 @@ def _get_frame_path(frame, base_dir):
     return path
 
 def _parse_labels(labels):
-    parsed_labels = {}
+    parsed_labels = OrderedDict()
 
     last_label = ""
     for token in shlex.split(labels):
         if token[0] != "~" and token[0] != "@":
             if token in parsed_labels:
-                raise ValueError("labels string is not corect. " + 
+                raise ValueError("labels string is not corect. " +
                     "`{}` label is specified at least twice.".format(token))
 
             parsed_labels[token] = {}
@@ -381,14 +402,16 @@ def _parse_labels(labels):
                     raise ValueError("labels string is not corect. " +
                         "`{}` attribute has incorrect value.".format(attr['name']))
             elif attr['type'] == 'number': # <prefix>number=name:min,max,step
-                if not (len(values) == 3 and values[0].isdigit() and \
-                    values[1].isdigit() and values[2].isdigit() and \
-                    int(values[0]) < int(values[1])):
-                    raise ValueError("labels string is not corect. " +
+                try:
+                    if len(values) != 3 or float(values[2]) <= 0 or \
+                        float(values[0]) >= float(values[1]):
+                        raise ValueError
+                except ValueError:
+                    raise ValueError("labels string is not correct. " +
                         "`{}` attribute has incorrect format.".format(attr['name']))
 
             if attr['name'] in parsed_labels[last_label]:
-                raise ValueError("labels string is not corect. " + 
+                raise ValueError("labels string is not corect. " +
                     "`{}` attribute is specified at least twice.".format(attr['name']))
 
             parsed_labels[last_label][attr['name']] = attr
@@ -504,6 +527,8 @@ def _find_and_unpack_archive(upload_dir):
     else:
         raise Exception('Type defined as archive, but archives were not found.')
 
+    return archive
+
 
 '''
     Search a video in upload dir and split it by frames. Copy frames to target dirs
@@ -531,6 +556,8 @@ def _find_and_extract_video(upload_dir, output_dir, db_task, compress_quality, f
     else:
         raise Exception("Video files were not found")
 
+    return video
+
 
 '''
     Recursive search for all images in upload dir and compress it to RGB jpg with specified quality. Create symlinks for them.
@@ -544,7 +571,6 @@ def _find_and_compress_images(upload_dir, output_dir, db_task, compress_quality,
     filenames.sort()
 
     if len(filenames):
-        compressed_names = []
         for idx, name in enumerate(filenames):
             job.meta['status'] = 'Images are being compressed.. {}%'.format(idx * 100 // len(filenames))
             job.save_meta()
@@ -554,10 +580,12 @@ def _find_and_compress_images(upload_dir, output_dir, db_task, compress_quality,
                 image = image.transpose(Image.ROTATE_180)
             image.save(compressed_name, quality=compress_quality, optimize=True)
             image.close()
-            compressed_names.append(compressed_name)
             if compressed_name != name:
                 os.remove(name)
-        filenames = compressed_names
+                # PIL::save uses filename in order to define image extension.
+                # We need save it as jpeg for compression and after rename the file
+                # Else annotation file will contain invalid file names (with other extensions)
+                os.rename(compressed_name, name)
 
         for frame, image_orig_path in enumerate(filenames):
             image_dest_path = _get_frame_path(frame, output_dir)
@@ -570,17 +598,21 @@ def _find_and_compress_images(upload_dir, output_dir, db_task, compress_quality,
     else:
         raise Exception("Image files were not found")
 
+    return filenames
+
 def _save_task_to_db(db_task, task_params):
     db_task.overlap = min(db_task.size, task_params['overlap'])
     db_task.mode = task_params['mode']
     db_task.z_order = task_params['z_order']
     db_task.flipped = task_params['flip']
+    db_task.source = task_params['data']
 
     segment_step = task_params['segment'] - db_task.overlap
     for x in range(0, db_task.size, segment_step):
         start_frame = x
         stop_frame = min(x + task_params['segment'] - 1, db_task.size - 1)
-        global_logger.info("New segment for task #{}: start_frame = {}, stop_frame = {}".format(db_task.id, start_frame, stop_frame))
+        slogger.glob.info("New segment for task #{}: start_frame = {}, \
+            stop_frame = {}".format(db_task.id, start_frame, stop_frame))
 
         db_segment = models.Segment()
         db_segment.task = db_task
@@ -608,13 +640,10 @@ def _save_task_to_db(db_task, task_params):
     db_task.save()
 
 
+@plugin_decorator
 @transaction.atomic
 def _create_thread(tid, params):
-    def raise_exception(images, dirs, videos, archives):
-        raise Exception('Only one archive, one video or many images can be dowloaded simultaneously. \
-            {} image(s), {} dir(s), {} video(s), {} archive(s) found'.format(images, dirs, videos, archives))
-
-    global_logger.info("create task #{}".format(tid))
+    slogger.glob.info("create task #{}".format(tid))
     job = rq.get_current_job()
 
     db_task = models.Task.objects.select_for_update().get(pk=tid)
@@ -642,10 +671,11 @@ def _create_thread(tid, params):
         job.save_meta()
         _copy_data_from_share(share_files_mapping, share_dirs_mapping)
 
+    archive = None
     if counters['archive']:
         job.meta['status'] = 'Archive is being unpacked..'
         job.save_meta()
-        _find_and_unpack_archive(upload_dir)
+        archive = _find_and_unpack_archive(upload_dir)
 
     # Define task mode and other parameters
     task_params = {
@@ -658,13 +688,22 @@ def _create_thread(tid, params):
     }
     task_params['overlap'] = int(params.get('overlap_size', 5 if task_params['mode'] == 'interpolation' else 0))
     task_params['overlap'] = min(task_params['overlap'], task_params['segment'] - 1)
-    global_logger.info("Task #{} parameters: {}".format(tid, task_params))
+    slogger.glob.info("Task #{} parameters: {}".format(tid, task_params))
 
     if task_params['mode'] == 'interpolation':
-        _find_and_extract_video(upload_dir, output_dir, db_task, task_params['compress'], task_params['flip'], job)
+        video = _find_and_extract_video(upload_dir, output_dir, db_task,
+            task_params['compress'], task_params['flip'], job)
+        task_params['data'] = os.path.relpath(video, upload_dir)
     else:
-        _find_and_compress_images(upload_dir, output_dir, db_task, task_params['compress'], task_params['flip'], job)
-    global_logger.info("Founded frames {} for task #{}".format(db_task.size, tid))
+        files =_find_and_compress_images(upload_dir, output_dir, db_task,
+            task_params['compress'], task_params['flip'], job)
+        if archive:
+            task_params['data'] = os.path.relpath(archive, upload_dir)
+        else:
+            task_params['data'] = '{} images: {}, ...'.format(len(files),
+                ", ".join([os.path.relpath(x, upload_dir) for x in files[0:2]]))
+
+    slogger.glob.info("Founded frames {} for task #{}".format(db_task.size, tid))
 
     job.meta['status'] = 'Task is being saved in database'
     job.save_meta()
